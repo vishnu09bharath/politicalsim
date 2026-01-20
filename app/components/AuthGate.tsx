@@ -1,34 +1,23 @@
 "use client";
 
-import { useState, useEffect, ReactNode } from "react";
+import { useState, ReactNode } from "react";
 
 const PASSWORD = "access";
 
 export default function AuthGate({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
-
-  useEffect(() => {
-    const auth = localStorage.getItem("site_authenticated");
-    setIsAuthenticated(auth === "true");
-  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (password === PASSWORD) {
-      localStorage.setItem("site_authenticated", "true");
       setIsAuthenticated(true);
       setError(false);
     } else {
       setError(true);
     }
   };
-
-  // Show nothing while checking auth status
-  if (isAuthenticated === null) {
-    return null;
-  }
 
   if (isAuthenticated) {
     return <>{children}</>;
