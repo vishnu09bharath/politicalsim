@@ -20,26 +20,6 @@ const latLonToVector3 = (lat: number, lon: number, radius: number) => {
   );
 };
 
-const createGlowTexture = () => {
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-
-  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-  gradient.addColorStop(0, "rgba(255, 235, 150, 0.9)");
-  gradient.addColorStop(0.6, "rgba(255, 215, 120, 0.4)");
-  gradient.addColorStop(1, "rgba(255, 215, 120, 0)");
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-};
-
 const createLabelTexture = (label: string) => {
   const canvas = document.createElement("canvas");
   canvas.width = 256;
@@ -153,7 +133,7 @@ export default function GlobeScene() {
       wireframe: true,
       transparent: true,
       opacity: 0.9,
-      depthTest: false,
+      depthTest: true,
       depthWrite: false,
     });
     const globeGeometry = new THREE.SphereGeometry(GLOBE_RADIUS, 48, 48);
@@ -165,37 +145,61 @@ export default function GlobeScene() {
       color: new THREE.Color("#f9df85"),
       transparent: true,
       opacity: 0.2,
+      depthWrite: false,
+      depthTest: false,
       blending: THREE.AdditiveBlending,
     });
     const glowGeometry = new THREE.SphereGeometry(GLOBE_RADIUS * 1.02, 48, 48);
     const glowGlobe = new THREE.Mesh(glowGeometry, glowMaterial);
     globeGroup.add(glowGlobe);
 
-    const continentMaterial = new THREE.MeshBasicMaterial({
+    const continentMaterialFront = new THREE.MeshBasicMaterial({
       color: new THREE.Color("#f8d67c"),
       transparent: true,
-      opacity: 0,
+      opacity: 1,
       depthWrite: false,
       depthTest: true,
-      alphaTest: 0.5,
+      alphaTest: 0.45,
+      side: THREE.FrontSide,
       polygonOffset: true,
       polygonOffsetFactor: 1,
       polygonOffsetUnits: 1,
     });
-    const continentGeometry = new THREE.SphereGeometry(GLOBE_RADIUS * 1.03, 64, 64);
-    const continents = new THREE.Mesh(continentGeometry, continentMaterial);
-    continents.renderOrder = 2;
-    globeGroup.add(continents);
+    const continentMaterialBack = new THREE.MeshBasicMaterial({
+      color: new THREE.Color("#c8a245"),
+      transparent: true,
+      opacity: 0.6,
+      depthWrite: false,
+      depthTest: false,
+      alphaTest: 0.1,
+      side: THREE.BackSide,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    });
+    const continentGeometryFront = new THREE.SphereGeometry(GLOBE_RADIUS * 1.03, 64, 64);
+    const continentGeometryBack = new THREE.SphereGeometry(GLOBE_RADIUS * 1.01, 64, 64);
+    const continentsFront = new THREE.Mesh(continentGeometryFront, continentMaterialFront);
+    continentsFront.renderOrder = 2.5;
+    globeGroup.add(continentsFront);
+    const continentsBack = new THREE.Mesh(continentGeometryBack, continentMaterialBack);
+    continentsBack.renderOrder = 1.5;
+    globeGroup.add(continentsBack);
 
     let landMaskTexture: THREE.Texture | null = null;
     createLandMaskTexture().then((texture) => {
       if (!texture) return;
       landMaskTexture = texture;
-      continentMaterial.alphaMap = texture;
-      continentMaterial.map = null;
-      continentMaterial.opacity = 0.8;
-      continentMaterial.depthWrite = false;
-      continentMaterial.needsUpdate = true;
+      continentMaterialFront.alphaMap = texture;
+      continentMaterialFront.map = null;
+      continentMaterialFront.opacity = 1;
+      continentMaterialFront.depthWrite = false;
+      continentMaterialFront.needsUpdate = true;
+      continentMaterialBack.alphaMap = texture;
+      continentMaterialBack.map = null;
+      continentMaterialBack.opacity = 0.6;
+      continentMaterialBack.depthWrite = false;
+      continentMaterialBack.needsUpdate = true;
     });
 
     const markersGroup = new THREE.Group();
@@ -205,13 +209,7 @@ export default function GlobeScene() {
     const markerMaterial = new THREE.MeshBasicMaterial({
       color: new THREE.Color("#ffe29a"),
     });
-    const glowTexture = createGlowTexture();
-    const pulseTargets: Array<{ sprite: THREE.Sprite; baseScale: number }> = [];
     const markerTextures: THREE.Texture[] = [];
-
-    if (glowTexture) {
-      markerTextures.push(glowTexture);
-    }
 
     LOIS.forEach((loi) => {
       const markerGroup = new THREE.Group();
@@ -222,23 +220,6 @@ export default function GlobeScene() {
       const marker = new THREE.Mesh(markerGeometry, markerMaterial);
       marker.renderOrder = 3;
       markerGroup.add(marker);
-
-      if (glowTexture) {
-        const glowMaterial = new THREE.SpriteMaterial({
-          map: glowTexture,
-          color: new THREE.Color("#ffe6a6"),
-          transparent: true,
-          opacity: 0.9,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-        });
-        const glow = new THREE.Sprite(glowMaterial);
-        const baseScale = 0.35;
-        glow.scale.set(baseScale, baseScale, baseScale);
-        glow.renderOrder = 3;
-        markerGroup.add(glow);
-        pulseTargets.push({ sprite: glow, baseScale });
-      }
 
       const labelTexture = createLabelTexture(loi.label);
       if (labelTexture) {
@@ -316,11 +297,6 @@ export default function GlobeScene() {
         globeGroup.rotation.y += 0.002 + spinVelocity;
         spinVelocity *= 0.95;
       }
-      const time = performance.now() * 0.002;
-      pulseTargets.forEach((target, index) => {
-        const pulse = 1 + Math.sin(time + index) * 0.25;
-        target.sprite.scale.setScalar(target.baseScale * pulse);
-      });
       renderer.render(scene, camera);
       animationFrame = requestAnimationFrame(animate);
     };
@@ -337,11 +313,13 @@ export default function GlobeScene() {
       renderer.dispose();
       globeGeometry.dispose();
       glowGeometry.dispose();
-      continentGeometry.dispose();
+      continentGeometryFront.dispose();
+      continentGeometryBack.dispose();
       markerGeometry.dispose();
       wireframeMaterial.dispose();
       glowMaterial.dispose();
-      continentMaterial.dispose();
+      continentMaterialFront.dispose();
+      continentMaterialBack.dispose();
       markerMaterial.dispose();
       markerTextures.forEach((texture) => texture.dispose());
       if (landMaskTexture) landMaskTexture.dispose();
