@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, ReactNode } from "react";
+import VideoIntro from "./VideoIntro";
 
 const PASSWORD = "access";
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [showIntro, setShowIntro] = useState(true);
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
 
@@ -20,7 +22,12 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   };
 
   if (isAuthenticated) {
-    return <>{children}</>;
+    return (
+      <>
+        {showIntro && <VideoIntro onComplete={() => setShowIntro(false)} />}
+        {children}
+      </>
+    );
   }
 
   return (
