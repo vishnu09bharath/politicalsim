@@ -11,8 +11,10 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
+    document.body.classList.add("intro-active");
     return () => {
       document.body.style.overflow = "";
+      document.body.classList.remove("intro-active");
     };
   }, []);
 
@@ -74,6 +76,7 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
     completedRef.current = true;
     setIsFadingOut(true);
     setTimeout(() => {
+      document.body.classList.remove("intro-active");
       onComplete();
     }, 1500);
   };
