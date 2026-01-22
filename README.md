@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PoliticalSim Globe
 
-## Getting Started
+Interactive intro + responsibility-shift globe experience.
 
-First, run the development server:
+## Quick Start
+1. Install deps: `npm install`
+2. Dev server: `npm run dev`
+3. Open the printed URL (default `http://localhost:3000`).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## Intro Video
+- Autoplays full-screen, no controls.
+- Skip: press `L` three times quickly.
+- Video file: `public/intro.mp4` (replace with your clip).
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Globe Interaction
+- Rotatable, glowing wireframe globe with LOI markers and red connections.
+- Passive spin pauses on selection; globe reorients so origin is forward/mid, destination downward.
+- Non-selected lines dim when a connection is active.
+- Click/drag to rotate manually.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Connections & LOIs
+- Defined in `app/components/GlobeScene.tsx`:
+  - `LOIS`: labeled locations with lat/lon.
+  - `LOI_CONNECTIONS`: connections with titles, widths, and description text.
+- Dropdown (top right) lists all connections; selecting opens the detail panel.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## UI Notes
+- Panel sits top-right with wrapped titles; globe shifts left when panel is open.
+- Dropdown fades/disabled during intro.
+- Line thickness reduced for clarity; invisible pick tubes remain for easy clicking.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Build
+- Production build: `npm run build`
+- Stack: Next.js (App Router) + Three.js; panel renders plain text (no markdown dependency).
