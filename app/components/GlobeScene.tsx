@@ -5,6 +5,8 @@ import * as THREE from "three";
 
 const GLOBE_RADIUS = 1.6;
 
+
+
 const LOIS = [
   { label: "U.S. Federal Procurement", lat: 38.9072, lon: -77.0369 },
   { label: "Amazon Web Services (AWS)", lat: 47.6062, lon: -122.3321 },
@@ -204,17 +206,42 @@ const createGreatCirclePoints = (
 
 const createLabelTexture = (label: string) => {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 64;
+  canvas.width = 512;
+  canvas.height = 128;
   const context = canvas.getContext("2d");
   if (!context) return null;
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.font = "600 28px Helvetica, Arial, sans-serif";
   context.fillStyle = "rgba(255, 236, 170, 0.95)";
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText(label, canvas.width / 2, canvas.height / 2);
+
+  const margin = 24;
+  const maxWidth = canvas.width - margin * 2;
+  const fontSize = 26;
+  context.font = `600 ${fontSize}px Helvetica, Arial, sans-serif`;
+
+  const words = label.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  words.forEach((word) => {
+    const test = current ? `${current} ${word}` : word;
+    if (context.measureText(test).width > maxWidth) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
+  });
+  if (current) lines.push(current);
+
+  const lineHeight = fontSize + 6;
+  const totalHeight = lineHeight * lines.length;
+  let y = (canvas.height - totalHeight) / 2 + lineHeight / 2;
+  lines.forEach((line) => {
+    context.fillText(line, canvas.width / 2, y);
+    y += lineHeight;
+  });
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -299,6 +326,12 @@ export default function GlobeScene() {
   const containerRef = useRef<HTMLDivElement>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const pointerRef = useRef(new THREE.Vector2());
+  const targetQuatRef = useRef<THREE.Quaternion | null>(null);
+  const connectionObjectsRef = useRef<
+    Array<{ mesh: THREE.Mesh; data: (typeof LOI_CONNECTIONS)[number] }>
+  >([]);
+  const connectionMaterialsRef = useRef<THREE.Material[]>([]);
+  const focusRef = useRef<((conn: (typeof LOI_CONNECTIONS)[number]) => void) | null>(null);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -405,10 +438,11 @@ export default function GlobeScene() {
     });
     const markerTextures: THREE.Texture[] = [];
     const connectionGeometries: THREE.BufferGeometry[] = [];
+    const connectionMaterials: THREE.Material[] = [];
     const pickingGeometries: THREE.BufferGeometry[] = [];
-    const connectionMaterial = new THREE.MeshBasicMaterial({
+    const connectionBaseMaterial = new THREE.MeshBasicMaterial({
       color: new THREE.Color("#ff4d4d"),
-      transparent: false,
+      transparent: true,
       opacity: 1,
       depthWrite: true,
       depthTest: true,
@@ -454,7 +488,8 @@ export default function GlobeScene() {
       }
     });
 
-    const connectionObjects: THREE.Object3D[] = [];
+    const connectionObjects: Array<{ mesh: THREE.Mesh; data: (typeof LOI_CONNECTIONS)[number] }> = [];
+    connectionObjectsRef.current = connectionObjects;
 
     LOI_CONNECTIONS.forEach((connection) => {
       const { from, to, width } = connection;
@@ -467,13 +502,17 @@ export default function GlobeScene() {
       const geometry = new THREE.TubeGeometry(curve, 512, baseRadius, 16, false);
       geometry.computeBoundingBox();
       geometry.computeBoundingSphere();
-      connectionGeometries.push(geometry);
-      const tube = new THREE.Mesh(geometry, connectionMaterial);
+        connectionGeometries.push(geometry);
+      const lineMaterial = connectionBaseMaterial.clone();
+      connectionMaterials.push(lineMaterial);
+      connectionMaterialsRef.current = connectionMaterials;
+      const tube = new THREE.Mesh(geometry, lineMaterial);
       tube.renderOrder = 2.8;
       tube.userData.connection = connection;
       tube.frustumCulled = false;
       connectionsGroup.add(tube);
-      connectionObjects.push(tube);
+      connectionObjects.push({ mesh: tube, data: connection });
+      connectionObjectsRef.current = connectionObjects;
 
       const pickGeometry = new THREE.TubeGeometry(curve, 64, baseRadius * 4, 8, false);
       pickGeometry.computeBoundingBox();
@@ -516,6 +555,45 @@ export default function GlobeScene() {
       isDragging = false;
     };
 
+    const focusOnConnection = (connection: (typeof LOI_CONNECTIONS)[number]) => {
+      const start = loiPositions.get(connection.from)?.clone().normalize();
+      const end = loiPositions.get(connection.to)?.clone().normalize();
+      if (!start || !end) return;
+
+      // Desired orientation: origin toward a forward middle vector; destination toward -Y
+      const targetOrigin = new THREE.Vector3(0, 0.35, 0.94).normalize();
+      const targetDest = new THREE.Vector3(0, -1, 0);
+
+      // First rotation: map start to targetOrigin
+      const q1 = new THREE.Quaternion().setFromUnitVectors(start, targetOrigin);
+      const end1 = end.clone().applyQuaternion(q1).normalize();
+
+      // Project destination and targetDest onto plane perpendicular to targetOrigin
+      const projectOnPlane = (v: THREE.Vector3, n: THREE.Vector3) => {
+        const nv = n.clone().multiplyScalar(v.dot(n));
+        return v.clone().sub(nv);
+      };
+      const endProj = projectOnPlane(end1, targetOrigin);
+      const destProj = projectOnPlane(targetDest, targetOrigin);
+
+      // If projections are near-zero, skip second rotation
+      if (endProj.lengthSq() < 1e-6 || destProj.lengthSq() < 1e-6) {
+        targetQuatRef.current = q1;
+        return;
+      }
+
+      endProj.normalize();
+      destProj.normalize();
+      const cross = new THREE.Vector3().crossVectors(endProj, destProj);
+      const dot = endProj.dot(destProj);
+      const angle = Math.atan2(targetOrigin.dot(cross), dot);
+      const q2 = new THREE.Quaternion().setFromAxisAngle(targetOrigin, angle);
+
+      const target = q2.multiply(q1);
+      targetQuatRef.current = target;
+    };
+    focusRef.current = focusOnConnection;
+
     const onClick = (event: MouseEvent) => {
       if (isDragging) return;
       const rect = canvasEl.getBoundingClientRect();
@@ -525,7 +603,6 @@ export default function GlobeScene() {
       const raycaster = raycasterRef.current;
       raycaster.setFromCamera(pointer, camera);
 
-      // Update world matrices before raycasting
       globeGroup.updateMatrixWorld(true);
       connectionsGroup.updateMatrixWorld(true);
       pickingGroup.updateMatrixWorld(true);
@@ -564,11 +641,20 @@ export default function GlobeScene() {
 
     let animationFrame: number;
     const animate = () => {
-      if (!isDragging) {
+      if (!isDragging && !selectedConnection) {
         globeGroup.rotation.y += 0.002 + spinVelocity;
         spinVelocity *= 0.95;
       }
-      // Sync picking group rotation with globe
+
+      if (targetQuatRef.current) {
+        const t = 0.12;
+        globeGroup.quaternion.slerp(targetQuatRef.current, t);
+        if (globeGroup.quaternion.angleTo(targetQuatRef.current) < 0.0005) {
+          globeGroup.quaternion.copy(targetQuatRef.current);
+          targetQuatRef.current = null;
+        }
+      }
+
       pickingGroup.rotation.copy(globeGroup.rotation);
       renderer.render(scene, camera);
       animationFrame = requestAnimationFrame(animate);
@@ -597,7 +683,9 @@ export default function GlobeScene() {
       markerMaterial.dispose();
       connectionGeometries.forEach((geometry) => geometry.dispose());
       pickingGeometries.forEach((geometry) => geometry.dispose());
-      connectionMaterial.dispose();
+      connectionMaterials.forEach((mat) => mat.dispose());
+      connectionObjectsRef.current = [];
+      connectionMaterialsRef.current = [];
       pickingMaterial.dispose();
       markerTextures.forEach((texture) => texture.dispose());
       if (landMaskTexture) landMaskTexture.dispose();
@@ -661,6 +749,33 @@ export default function GlobeScene() {
 
   const globeShift = isPanelOpen ? "translateX(-300px)" : "translateX(0px)";
 
+  useEffect(() => {
+    const mats = connectionMaterialsRef.current;
+    const objs = connectionObjectsRef.current;
+    if (!mats.length || !objs.length) return;
+    const isSelected = Boolean(selectedConnection);
+    mats.forEach((mat, idx) => {
+      const mesh = objs[idx]?.mesh;
+      const data = objs[idx]?.data;
+      const active =
+        selectedConnection &&
+        data &&
+        data.from === selectedConnection.from &&
+        data.to === selectedConnection.to;
+      const opacity = active ? 1 : isSelected ? 0.08 : 1;
+      const m = mat as THREE.MeshBasicMaterial;
+      m.opacity = opacity;
+      m.transparent = true;
+      m.needsUpdate = true;
+      if (mesh) mesh.visible = active || !isSelected;
+    });
+    if (selectedConnection && focusRef.current) {
+      focusRef.current(selectedConnection);
+    } else {
+      targetQuatRef.current = null;
+    }
+  }, [selectedConnection]);
+
   return (
     <div className="relative flex h-full w-full bg-black text-gray-200">
       <div
@@ -669,7 +784,7 @@ export default function GlobeScene() {
         }`}
       >
         <select
-          className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-900/85 px-3 py-2 text-sm text-gray-100 shadow-lg backdrop-blur-md"
+          className="pointer-events-auto rounded-lg border border-zinc-700 bg-zinc-900/85 px-3 py-2 text-sm text-gray-100 shadow-lg backdrop-blur-md w-64"
           value={selectedId ?? ""}
           onChange={handleSelectChange}
           disabled={introActive}
@@ -702,7 +817,7 @@ export default function GlobeScene() {
         {isPanelOpen && (
           <>
             <div className="text-xs uppercase tracking-wide text-gray-400">Connection</div>
-            <div className="text-base font-semibold text-gray-100">
+            <div className="text-base font-semibold text-gray-100 break-words whitespace-normal leading-snug">
               {selectedConnection?.title ?? `${selectedConnection?.from} → ${selectedConnection?.to}`}
             </div>
             <div className="text-sm leading-relaxed text-gray-100 space-y-2">
