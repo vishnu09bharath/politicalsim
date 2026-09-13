@@ -6,6 +6,7 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
   const [isFadingIn, setIsFadingIn] = useState(true);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const [needsInteraction, setNeedsInteraction] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const completedRef = useRef(false);
 
@@ -27,7 +28,7 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
       setIsVideoVisible(true);
       setIsFadingIn(false);
       setTimeout(() => {
-        video.play();
+        video.play().catch(() => setNeedsInteraction(true));
       }, 500);
     };
 
@@ -85,6 +86,15 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
     finishIntro();
   };
 
+  const handleStartClick = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video
+      .play()
+      .then(() => setNeedsInteraction(false))
+      .catch(() => finishIntro());
+  };
+
   return (
     <div
       className={`fixed inset-0 z-50 flex items-center justify-center bg-black transition-opacity ${
@@ -102,6 +112,15 @@ export default function VideoIntro({ onComplete }: { onComplete: () => void }) {
       >
         <source src="/intro.mp4" type="video/mp4" />
       </video>
+      {needsInteraction && (
+        <button
+          type="button"
+          onClick={handleStartClick}
+          className="absolute inset-0 flex items-center justify-center bg-black/60 text-sm uppercase tracking-[0.3em] text-zinc-200 transition-colors hover:text-white"
+        >
+          Click to begin
+        </button>
+      )}
     </div>
   );
 }

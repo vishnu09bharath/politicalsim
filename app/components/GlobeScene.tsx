@@ -326,7 +326,8 @@ export default function GlobeScene() {
   const containerRef = useRef<HTMLDivElement>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const pointerRef = useRef(new THREE.Vector2());
-  const targetQuatRef = useRef<THREE.Quaternion | null>(null);
+  const targetOrientationRef = useRef<{ yaw: number; pitch: number } | null>(null);
+  const hasSelectionRef = useRef(false);
   const connectionObjectsRef = useRef<
     Array<{ mesh: THREE.Mesh; data: (typeof LOI_CONNECTIONS)[number] }>
   >([]);
@@ -528,6 +529,14 @@ export default function GlobeScene() {
     let previousX = 0;
     let previousY = 0;
     let spinVelocity = 0;
+    let yaw = 0;
+    let pitch = 0;
+    const MAX_PITCH = Math.PI / 2.2;
+    const clampPitch = (value: number) => Math.max(-MAX_PITCH, Math.min(MAX_PITCH, value));
+    const applyOrientation = () => {
+      globeGroup.rotation.set(pitch, yaw, 0);
+      pickingGroup.rotation.set(pitch, yaw, 0);
+    };
 
     const onPointerDown = (event: PointerEvent) => {
       isDragging = true;
@@ -542,12 +551,8 @@ export default function GlobeScene() {
       previousX = event.clientX;
       previousY = event.clientY;
 
-      globeGroup.rotation.y += deltaX * 0.005;
-      globeGroup.rotation.x += deltaY * 0.003;
-      globeGroup.rotation.x = Math.max(
-        -Math.PI / 2.2,
-        Math.min(Math.PI / 2.2, globeGroup.rotation.x)
-      );
+      yaw += deltaX * 0.005;
+      pitch = clampPitch(pitch + deltaY * 0.003);
       spinVelocity = deltaX * 0.0008;
     };
 
@@ -560,37 +565,23 @@ export default function GlobeScene() {
       const end = loiPositions.get(connection.to)?.clone().normalize();
       if (!start || !end) return;
 
-      // Desired orientation: origin toward a forward middle vector; destination toward -Y
-      const targetOrigin = new THREE.Vector3(0, 0.35, 0.94).normalize();
-      const targetDest = new THREE.Vector3(0, -1, 0);
+      const focus = start.clone().add(end);
+      if (focus.lengthSq() < 1e-6) focus.copy(start);
+      focus.normalize();
 
-      // First rotation: map start to targetOrigin
-      const q1 = new THREE.Quaternion().setFromUnitVectors(start, targetOrigin);
-      const end1 = end.clone().applyQuaternion(q1).normalize();
+      const target = new THREE.Vector3(0, 0.2, 1).normalize();
 
-      // Project destination and targetDest onto plane perpendicular to targetOrigin
-      const projectOnPlane = (v: THREE.Vector3, n: THREE.Vector3) => {
-        const nv = n.clone().multiplyScalar(v.dot(n));
-        return v.clone().sub(nv);
-      };
-      const endProj = projectOnPlane(end1, targetOrigin);
-      const destProj = projectOnPlane(targetDest, targetOrigin);
+      const azimuth = Math.atan2(focus.x, focus.z);
+      let targetYaw = -azimuth;
+      const turns = Math.round((yaw - targetYaw) / (Math.PI * 2));
+      targetYaw += turns * Math.PI * 2;
 
-      // If projections are near-zero, skip second rotation
-      if (endProj.lengthSq() < 1e-6 || destProj.lengthSq() < 1e-6) {
-        targetQuatRef.current = q1;
-        return;
-      }
+      const horizontal = Math.hypot(focus.x, focus.z);
+      const focusElevation = Math.atan2(focus.y, horizontal);
+      const targetElevation = Math.atan2(target.y, target.z);
+      const targetPitch = clampPitch(focusElevation - targetElevation);
 
-      endProj.normalize();
-      destProj.normalize();
-      const cross = new THREE.Vector3().crossVectors(endProj, destProj);
-      const dot = endProj.dot(destProj);
-      const angle = Math.atan2(targetOrigin.dot(cross), dot);
-      const q2 = new THREE.Quaternion().setFromAxisAngle(targetOrigin, angle);
-
-      const target = q2.multiply(q1);
-      targetQuatRef.current = target;
+      targetOrientationRef.current = { yaw: targetYaw, pitch: targetPitch };
     };
     focusRef.current = focusOnConnection;
 
@@ -641,21 +632,24 @@ export default function GlobeScene() {
 
     let animationFrame: number;
     const animate = () => {
-      if (!isDragging && !selectedConnection) {
-        globeGroup.rotation.y += 0.002 + spinVelocity;
+      if (!isDragging && !hasSelectionRef.current) {
+        yaw += 0.002 + spinVelocity;
         spinVelocity *= 0.95;
       }
 
-      if (targetQuatRef.current) {
+      const target = targetOrientationRef.current;
+      if (target && !isDragging) {
         const t = 0.12;
-        globeGroup.quaternion.slerp(targetQuatRef.current, t);
-        if (globeGroup.quaternion.angleTo(targetQuatRef.current) < 0.0005) {
-          globeGroup.quaternion.copy(targetQuatRef.current);
-          targetQuatRef.current = null;
+        yaw += (target.yaw - yaw) * t;
+        pitch += (target.pitch - pitch) * t;
+        if (Math.abs(target.yaw - yaw) < 0.0005 && Math.abs(target.pitch - pitch) < 0.0005) {
+          yaw = target.yaw;
+          pitch = target.pitch;
+          targetOrientationRef.current = null;
         }
       }
 
-      pickingGroup.rotation.copy(globeGroup.rotation);
+      applyOrientation();
       renderer.render(scene, camera);
       animationFrame = requestAnimationFrame(animate);
     };
@@ -769,10 +763,11 @@ export default function GlobeScene() {
       m.needsUpdate = true;
       if (mesh) mesh.visible = active || !isSelected;
     });
+    hasSelectionRef.current = Boolean(selectedConnection);
     if (selectedConnection && focusRef.current) {
       focusRef.current(selectedConnection);
     } else {
-      targetQuatRef.current = null;
+      targetOrientationRef.current = null;
     }
   }, [selectedConnection]);
 

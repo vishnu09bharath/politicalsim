@@ -4,8 +4,17 @@ Interactive intro + responsibility-shift globe experience.
 
 ## Quick Start
 1. Install deps: `npm install`
-2. Dev server: `npm run dev`
-3. Open the printed URL (default `http://localhost:3000`).
+2. Copy `.env.example` to `.env.local` and fill it in (see Access Control).
+3. Dev server: `npm run dev`
+4. Open the printed URL (default `http://localhost:3000`).
+
+## Access Control
+The site sits behind a password enforced on the server (`proxy.ts`), not in the browser.
+- `SITE_PASSWORD`: the password visitors enter at `/login`.
+- `AUTH_SECRET`: random string (32+ chars) used to sign the session cookie. Generate one with `openssl rand -base64 48`.
+- Sessions last 7 days in an httpOnly cookie. `POST /api/logout` clears it.
+- Login attempts are limited to 5 per IP per 15 minutes.
+- Set both variables in your hosting provider's environment settings before deploying; logins are refused if `SITE_PASSWORD` is missing.
 
 ## Intro Video
 - Autoplays full-screen, no controls.
@@ -14,7 +23,7 @@ Interactive intro + responsibility-shift globe experience.
 
 ## Globe Interaction
 - Rotatable, glowing wireframe globe with LOI markers and red connections.
-- Passive spin pauses on selection; globe reorients so origin is forward/mid, destination downward.
+- Passive spin pauses on selection; globe turns so the connection midpoint faces the camera, always right side up.
 - Non-selected lines dim when a connection is active.
 - Click/drag to rotate manually.
 
